@@ -1,0 +1,14 @@
+[package]
+name = "verdict"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.70"
+description = "A friendly, dependency-free diff clone for an AI-native shell"
+license = "MIT"
+repository = "https://github.com/NefaroXX/verdict"
+readme = "README.md"
+keywords = ["diff", "cli", "compare", "unified", "text"]
+categories = ["command-line-utilities", "text-processing"]
+authors = ["NefaroXX"]
+
+[dependencies]
