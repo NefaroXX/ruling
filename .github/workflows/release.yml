@@ -50,5 +50,36 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          gh release delete "$tag" --yes || true
-          gh release create "$tag" artifacts/ruling-* --generate-notes
+          repo="${GITHUB_REPOSITORY}"
+          api="https://api.github.com/repos/${repo}"
+
+          # Delete existing release for this tag if present
+          release_id=$(curl -s -H "Authorization: Bearer ${GH_TOKEN}" \
+            "${api}/releases/tags/${tag}" | jq -r '.id // empty')
+          if [ -n "$release_id" ]; then
+            echo "Deleting existing release ${release_id} for ${tag}"
+            curl -s -X DELETE -H "Authorization: Bearer ${GH_TOKEN}" \
+              "${api}/releases/${release_id}" > /dev/null
+          fi
+
+          # Create the release
+          curl -s -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+            -H "Content-Type: application/json" \
+            "${api}/releases" -d "{
+              \"tag_name\": \"${tag}\",
+              \"name\": \"${tag}\",
+              \"generate_release_notes\": true
+            }" > /dev/null
+
+          # Upload each binary asset
+          release_id=$(curl -s -H "Authorization: Bearer ${GH_TOKEN}" \
+            "${api}/releases/tags/${tag}" | jq -r '.id')
+          for file in artifacts/ruling-*; do
+            name=$(basename "$file")
+            echo "Uploading ${name}"
+            curl -s -X POST -H "Authorization: Bearer ${GH_TOKEN}" \
+              -H "Content-Type: application/octet-stream" \
+              "${api}/releases/${release_id}/assets?name=${name}" \
+              --data-binary "@${file}" > /dev/null
+          done
+          echo "Release ${tag} created with assets"
