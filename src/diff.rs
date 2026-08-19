@@ -15,6 +15,17 @@ pub enum DiffLine {
     Added(String),
 }
 
+/// A word-level segment within a changed line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum WordDiff {
+    /// An unchanged word.
+    Context(String),
+    /// A word removed from the old file.
+    Removed(String),
+    /// A word added in the new file.
+    Added(String),
+}
+
 /// A contiguous region of differences in a unified diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Hunk {
@@ -30,36 +41,56 @@ pub struct Hunk {
     pub lines: Vec<DiffLine>,
 }
 
+/// Options that control how hunks are computed and formatted.
+#[derive(Debug, Clone)]
+pub struct DiffOptions {
+    /// Number of context lines around changes (default 3).
+    pub context: usize,
+    /// Compare lines case-insensitively.
+    pub ignore_case: bool,
+    /// Ignore all whitespace when comparing lines.
+    pub ignore_all_space: bool,
+    /// Show word-level intra-line highlighting.
+    pub word_diff: bool,
+}
+
+impl Default for DiffOptions {
+    fn default() -> Self {
+        Self {
+            context: 3,
+            ignore_case: false,
+            ignore_all_space: false,
+            word_diff: false,
+        }
+    }
+}
+
 /// Compute a list of unified hunks describing the differences between `old`
 /// and `new`.
 ///
-/// `context` is the number of unchanged lines to include around each change
-/// (0 means no context). If `ignore_case` is true, lines are compared
-/// case-insensitively for equality purposes.
-///
-/// The implementation uses the classic dynamic-programming (LCS) approach. A
-/// full `(n+1) x (m+1)` DP table is retained so that reconstruction can walk
-/// arbitrary rows; a rolling two-row table would corrupt the edit script
-/// because reconstruction needs `dp[i+1][j]` and `dp[i][j+1]` at arbitrary
-/// `i` as the walk advances.
+/// This is the primary entry point for backward compatibility. For full
+/// control over options, use [`compute_hunks_with_options`].
 pub fn compute_hunks(
     old: &[String],
     new: &[String],
     context: usize,
     ignore_case: bool,
 ) -> Vec<Hunk> {
-    // Determine which line pairs are "equal" under the configured comparison.
-    let eq = |a: &str, b: &str| {
-        if ignore_case {
-            a.eq_ignore_ascii_case(b)
-        } else {
-            a == b
-        }
-    };
+    compute_hunks_with_options(
+        old,
+        new,
+        &DiffOptions {
+            context,
+            ignore_case,
+            ..DiffOptions::default()
+        },
+    )
+}
 
-    // Compute the longest common subsequence (LCS) DP table. `dp[i][j]` is the
-    // length of the LCS of `old[i..]` and `new[j..]`. We iterate from the
-    // bottom-right corner toward the top-left.
+/// Compute hunks with full control over comparison and formatting options.
+pub fn compute_hunks_with_options(old: &[String], new: &[String], opts: &DiffOptions) -> Vec<Hunk> {
+    let eq = make_line_comparator(opts);
+
     let n = old.len();
     let m = new.len();
     let mut dp = vec![vec![0usize; m + 1]; n + 1];
@@ -140,7 +171,7 @@ pub fn compute_hunks(
                 // If we've moved more than `context` past the last change,
                 // this hunk ends here.
                 let last_change = furthest_change.unwrap_or(change_pos);
-                if cursor > last_change + context {
+                if cursor > last_change + opts.context {
                     break;
                 }
             }
@@ -156,10 +187,10 @@ pub fn compute_hunks(
         // backs up `context` lines before the first change; the high bound
         // extends `context` lines past the last change so trailing context is
         // included (matching GNU diff).
-        let old_lo = change_pos.saturating_sub(context);
-        let new_lo = change_pos.saturating_sub(context);
-        let old_hi = extent.saturating_add(context).min(n.saturating_sub(1));
-        let new_hi = extent.saturating_add(context).min(m.saturating_sub(1));
+        let old_lo = change_pos.saturating_sub(opts.context);
+        let new_lo = change_pos.saturating_sub(opts.context);
+        let old_hi = extent.saturating_add(opts.context).min(n.saturating_sub(1));
+        let new_hi = extent.saturating_add(opts.context).min(m.saturating_sub(1));
 
         // Emit the hunk lines by walking both sequences within bounds.
         let mut lines = Vec::new();
@@ -355,11 +386,333 @@ fn merge_adjacent_hunks(hunks: Vec<Hunk>, old: &[String], new: &[String]) -> Vec
     merged
 }
 
+/// Build a line-equality comparator based on the diff options.
+fn make_line_comparator(opts: &DiffOptions) -> impl Fn(&str, &str) -> bool {
+    let ignore_case = opts.ignore_case;
+    let ignore_all_space = opts.ignore_all_space;
+    move |a: &str, b: &str| {
+        let (a_norm, b_norm) = if ignore_all_space {
+            (collapse_whitespace(a), collapse_whitespace(b))
+        } else {
+            (a.to_owned(), b.to_owned())
+        };
+        if ignore_case {
+            a_norm.eq_ignore_ascii_case(&b_norm)
+        } else {
+            a_norm == b_norm
+        }
+    }
+}
+
+/// Collapse all whitespace runs to a single space, for whitespace-ignoring
+/// comparison.
+fn collapse_whitespace(s: &str) -> String {
+    let mut result = String::with_capacity(s.len());
+    let mut in_space = false;
+    for ch in s.chars() {
+        if ch.is_ascii_whitespace() {
+            if !in_space {
+                result.push(' ');
+                in_space = true;
+            }
+        } else {
+            result.push(ch);
+            in_space = false;
+        }
+    }
+    result
+}
+
+/// Compute word-level diff between two changed lines.
+///
+/// Splits each line into whitespace-delimited words, then computes the LCS
+/// of the word arrays to identify which words changed.
+pub fn compute_word_diff(old_line: &str, new_line: &str) -> Vec<WordDiff> {
+    let old_words: Vec<&str> = old_line.split_whitespace().collect();
+    let new_words: Vec<&str> = new_line.split_whitespace().collect();
+    let n = old_words.len();
+    let m = new_words.len();
+
+    let mut dp = vec![vec![0usize; m + 1]; n + 1];
+    for i in (0..n).rev() {
+        for j in (0..m).rev() {
+            if old_words[i] == new_words[j] {
+                dp[i][j] = dp[i + 1][j + 1] + 1;
+            } else {
+                dp[i][j] = dp[i + 1][j].max(dp[i][j + 1]);
+            }
+        }
+    }
+
+    let mut result = Vec::new();
+    let mut i = 0;
+    let mut j = 0;
+    while i < n && j < m {
+        if old_words[i] == new_words[j] {
+            result.push(WordDiff::Context(old_words[i].to_string()));
+            i += 1;
+            j += 1;
+        } else if dp[i + 1][j] >= dp[i][j + 1] {
+            result.push(WordDiff::Removed(old_words[i].to_string()));
+            i += 1;
+        } else {
+            result.push(WordDiff::Added(new_words[j].to_string()));
+            j += 1;
+        }
+    }
+    while i < n {
+        result.push(WordDiff::Removed(old_words[i].to_string()));
+        i += 1;
+    }
+    while j < m {
+        result.push(WordDiff::Added(new_words[j].to_string()));
+        j += 1;
+    }
+
+    result
+}
+
+/// Format word diff segments into a string with `{added}` and `[-removed-]`
+/// markers.
+pub fn format_word_diff(segments: &[WordDiff]) -> String {
+    let mut out = String::new();
+    for seg in segments {
+        match seg {
+            WordDiff::Context(w) => {
+                if !out.is_empty() {
+                    out.push(' ');
+                }
+                out.push_str(w);
+            }
+            WordDiff::Removed(w) => {
+                if !out.is_empty() && !out.ends_with('[') {
+                    out.push(' ');
+                }
+                out.push_str("[-");
+                out.push_str(w);
+                out.push_str("-]");
+            }
+            WordDiff::Added(w) => {
+                if !out.is_empty() && !out.ends_with('{') {
+                    out.push(' ');
+                }
+                out.push('{');
+                out.push_str(w);
+                out.push('}');
+            }
+        }
+    }
+    out
+}
+
+/// Detect the containing function/struct/class name by scanning backward
+/// from a given position in the file lines.
+pub fn detect_context_function(lines: &[String], start_idx: usize) -> Option<String> {
+    let search_start = start_idx.saturating_sub(100);
+    for i in (search_start..start_idx).rev() {
+        if let Some(line) = lines.get(i) {
+            let trimmed = line.trim();
+            if is_definition_line(trimmed) {
+                let display = if trimmed.len() > 60 {
+                    format!("{}...", &trimmed[..57])
+                } else {
+                    trimmed.to_string()
+                };
+                return Some(display);
+            }
+        }
+    }
+    None
+}
+
+/// Check if a line looks like a function/struct/class/impl definition.
+fn is_definition_line(line: &str) -> bool {
+    if line.is_empty() || line.starts_with("//") || line.starts_with('#') || line.starts_with("/*")
+    {
+        return false;
+    }
+
+    // Rust
+    if line.starts_with("fn ")
+        || line.starts_with("pub fn ")
+        || line.starts_with("pub(crate) fn ")
+        || line.starts_with("pub(super) fn ")
+        || line.starts_with("async fn ")
+        || line.starts_with("pub async fn ")
+        || line.starts_with("struct ")
+        || line.starts_with("enum ")
+        || line.starts_with("impl ")
+        || line.starts_with("trait ")
+        || line.starts_with("type ")
+        || line.starts_with("const ")
+        || line.starts_with("pub const ")
+        || line.starts_with("static ")
+        || line.starts_with("pub static ")
+        || line.starts_with("mod ")
+        || line.starts_with("pub mod ")
+    {
+        return true;
+    }
+
+    // Python
+    if line.starts_with("def ") || line.starts_with("class ") || line.starts_with("async def ") {
+        return true;
+    }
+
+    // JavaScript/TypeScript
+    if line.starts_with("function ")
+        || line.starts_with("export function ")
+        || line.starts_with("export default function ")
+        || line.starts_with("class ")
+        || line.starts_with("export class ")
+    {
+        return true;
+    }
+
+    // Go
+    if line.starts_with("func ") || line.starts_with("func (") {
+        return true;
+    }
+
+    // C/C++ heuristic: line with parens ending in `{`
+    if line.contains('(')
+        && !line.starts_with("if ")
+        && !line.starts_with("for ")
+        && !line.starts_with("while ")
+        && !line.starts_with("match ")
+        && !line.starts_with("switch ")
+        && !line.starts_with("return ")
+        && !line.starts_with("else")
+        && (line.ends_with('{') || line.ends_with(") {") || line.ends_with(");"))
+    {
+        return true;
+    }
+
+    false
+}
+
+/// Escape a string for JSON output.
+pub fn json_escape(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for ch in s.chars() {
+        match ch {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            c if c.is_control() => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+/// Format a list of hunks as a JSON string.
+pub fn format_json(
+    old_file: &str,
+    new_file: &str,
+    identical: bool,
+    hunks: &[Hunk],
+    old_lines: &[String],
+) -> String {
+    let mut out = String::from("{\n");
+
+    out.push_str("  \"meta\": {\n");
+    out.push_str(&format!(
+        "    \"old_file\": \"{}\",\n",
+        json_escape(old_file)
+    ));
+    out.push_str(&format!(
+        "    \"new_file\": \"{}\",\n",
+        json_escape(new_file)
+    ));
+    out.push_str(&format!("    \"identical\": {}\n", identical));
+    out.push_str("  },\n");
+
+    out.push_str("  \"hunks\": [\n");
+    for (idx, hunk) in hunks.iter().enumerate() {
+        out.push_str("    {\n");
+        out.push_str(&format!("      \"old_start\": {},\n", hunk.old_start));
+        out.push_str(&format!("      \"old_count\": {},\n", hunk.old_count));
+        out.push_str(&format!("      \"new_start\": {},\n", hunk.new_start));
+        out.push_str(&format!("      \"new_count\": {},\n", hunk.new_count));
+
+        let ctx = detect_context_function(old_lines, hunk.old_start.saturating_sub(1));
+        if let Some(ref c) = ctx {
+            out.push_str(&format!("      \"context\": \"{}\",\n", json_escape(c)));
+        }
+
+        out.push_str("      \"lines\": [\n");
+        let mut oi = hunk.old_start.saturating_sub(1);
+        let mut ni = hunk.new_start.saturating_sub(1);
+        for (line_idx, line) in hunk.lines.iter().enumerate() {
+            let comma = if line_idx + 1 < hunk.lines.len() {
+                ","
+            } else {
+                ""
+            };
+            match line {
+                DiffLine::Context(s) => {
+                    out.push_str(&format!(
+                        "        {{ \"type\": \"context\", \"content\": \"{}\", \"old_line\": {}, \"new_line\": {} }}{}\n",
+                        json_escape(s), oi + 1, ni + 1, comma
+                    ));
+                    oi += 1;
+                    ni += 1;
+                }
+                DiffLine::Removed(s) => {
+                    out.push_str(&format!(
+                        "        {{ \"type\": \"removed\", \"content\": \"{}\", \"old_line\": {} }}{}\n",
+                        json_escape(s), oi + 1, comma
+                    ));
+                    oi += 1;
+                }
+                DiffLine::Added(s) => {
+                    out.push_str(&format!(
+                        "        {{ \"type\": \"added\", \"content\": \"{}\", \"new_line\": {} }}{}\n",
+                        json_escape(s), ni + 1, comma
+                    ));
+                    ni += 1;
+                }
+            }
+        }
+        out.push_str("      ]\n");
+
+        let comma = if idx + 1 < hunks.len() { "," } else { "" };
+        out.push_str(&format!("    }}{}\n", comma));
+    }
+    out.push_str("  ],\n");
+
+    let insertions: usize = hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .filter(|l| matches!(l, DiffLine::Added(_)))
+        .count();
+    let deletions: usize = hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .filter(|l| matches!(l, DiffLine::Removed(_)))
+        .count();
+    let files_changed = if identical { 0 } else { 1 };
+
+    out.push_str("  \"summary\": {\n");
+    out.push_str(&format!("    \"files_changed\": {},\n", files_changed));
+    out.push_str(&format!("    \"insertions\": {},\n", insertions));
+    out.push_str(&format!("    \"deletions\": {}\n", deletions));
+    out.push_str("  }\n");
+    out.push_str("}\n");
+    out
+}
+
 /// Format a hunk header in GNU style: `@@ -a,b +c,d @@`.
 ///
-/// When a count is 1, GNU omits it (`@@ -a +c @@`). When a count is 0, the
-/// start is 0 and the count is omitted (`@@ -0 +1 @@`).
-pub fn format_hunk_header(h: &Hunk) -> String {
+/// When a count is 1, GNU omits it. When a count is 0, the start is 0
+/// and the count is omitted. An optional context string (e.g. function
+/// name) is appended after `@@`.
+pub fn format_hunk_header(h: &Hunk, context: Option<&str>) -> String {
     let old_range = if h.old_count == 0 {
         "0".to_string()
     } else if h.old_count == 1 {
@@ -374,13 +727,100 @@ pub fn format_hunk_header(h: &Hunk) -> String {
     } else {
         format!("{},{}", h.new_start, h.new_count)
     };
-    format!("@@ -{old_range} +{new_range} @@")
+    match context {
+        Some(ctx) => format!("@@ -{old_range} +{new_range} @@ {ctx}"),
+        None => format!("@@ -{old_range} +{new_range} @@"),
+    }
+}
+
+/// Format an entire hunk with options (word-diff, context headers).
+pub fn format_hunk_with_options(h: &Hunk, opts: &DiffOptions, old_lines: &[String]) -> String {
+    let mut out = String::new();
+
+    let ctx = if opts.context > 0 {
+        detect_context_function(old_lines, h.old_start.saturating_sub(1))
+    } else {
+        None
+    };
+    out.push_str(&format_hunk_header(h, ctx.as_deref()));
+    out.push('\n');
+
+    if opts.word_diff {
+        format_hunk_lines_word_diff(h, &mut out);
+    } else {
+        format_hunk_lines_plain(h, &mut out);
+    }
+
+    out
+}
+
+/// Format hunk lines with plain markers (no word diff).
+fn format_hunk_lines_plain(h: &Hunk, out: &mut String) {
+    for line in &h.lines {
+        match line {
+            DiffLine::Context(s) => {
+                out.push(' ');
+                out.push_str(s);
+            }
+            DiffLine::Removed(s) => {
+                out.push('-');
+                out.push_str(s);
+            }
+            DiffLine::Added(s) => {
+                out.push('+');
+                out.push_str(s);
+            }
+        }
+        out.push('\n');
+    }
+}
+
+/// Format hunk lines with word-level diff markers for changed line pairs.
+fn format_hunk_lines_word_diff(h: &Hunk, out: &mut String) {
+    let mut i = 0;
+    while i < h.lines.len() {
+        match &h.lines[i] {
+            DiffLine::Context(s) => {
+                out.push(' ');
+                out.push_str(s);
+                out.push('\n');
+                i += 1;
+            }
+            DiffLine::Removed(old_line) => {
+                if let Some(DiffLine::Added(new_line)) = h.lines.get(i + 1) {
+                    let segments = compute_word_diff(old_line, new_line);
+                    let formatted = format_word_diff(&segments);
+                    out.push_str("-[-");
+                    out.push_str(old_line);
+                    out.push_str("-]\n");
+                    out.push_str("+{");
+                    out.push_str(new_line);
+                    out.push_str("}\n");
+                    out.push(' ');
+                    out.push_str(&formatted);
+                    out.push('\n');
+                    i += 2;
+                } else {
+                    out.push('-');
+                    out.push_str(old_line);
+                    out.push('\n');
+                    i += 1;
+                }
+            }
+            DiffLine::Added(s) => {
+                out.push('+');
+                out.push_str(s);
+                out.push('\n');
+                i += 1;
+            }
+        }
+    }
 }
 
 /// Format an entire hunk (header plus lines) as a string.
 pub fn format_hunk(h: &Hunk) -> String {
     let mut out = String::new();
-    out.push_str(&format_hunk_header(h));
+    out.push_str(&format_hunk_header(h, None));
     out.push('\n');
     for line in &h.lines {
         match line {
@@ -470,7 +910,7 @@ mod tests {
                 DiffLine::Added("b".to_string()),
             ],
         };
-        assert_eq!(format_hunk_header(&h), "@@ -1 +1 @@");
+        assert_eq!(format_hunk_header(&h, None), "@@ -1 +1 @@");
     }
 
     #[test]
@@ -482,7 +922,7 @@ mod tests {
             new_count: 5,
             lines: vec![],
         };
-        assert_eq!(format_hunk_header(&h), "@@ -2,3 +4,5 @@");
+        assert_eq!(format_hunk_header(&h, None), "@@ -2,3 +4,5 @@");
     }
 
     #[test]
@@ -564,5 +1004,140 @@ mod tests {
         // 'gamma' must not be marked as changed.
         assert!(!text.contains("-gamma\n"));
         assert!(!text.contains("+gamma\n"));
+    }
+
+    // --- New feature tests ---
+
+    #[test]
+    fn ignore_all_space_treats_whitespace_differences_as_equal() {
+        let old = vec_of(&["let  x  =  1;", "let y = 2;"]);
+        let new = vec_of(&["let x = 1;", "let y = 2;"]);
+        let opts = DiffOptions {
+            ignore_all_space: true,
+            ..DiffOptions::default()
+        };
+        let hunks = compute_hunks_with_options(&old, &new, &opts);
+        assert!(
+            hunks.is_empty(),
+            "whitespace-only differences should be ignored"
+        );
+    }
+
+    #[test]
+    fn ignore_all_space_still_detects_real_changes() {
+        let old = vec_of(&["let  x  =  1;", "let y = 2;"]);
+        let new = vec_of(&["let x = 99;", "let y = 2;"]);
+        let opts = DiffOptions {
+            ignore_all_space: true,
+            ..DiffOptions::default()
+        };
+        let hunks = compute_hunks_with_options(&old, &new, &opts);
+        assert!(!hunks.is_empty(), "real content changes should be detected");
+    }
+
+    #[test]
+    fn collapse_whitespace_basic() {
+        assert_eq!(collapse_whitespace("  hello   world  "), " hello world ");
+        assert_eq!(collapse_whitespace("no_change"), "no_change");
+        assert_eq!(collapse_whitespace("  a\tb\n"), " a b ");
+    }
+
+    #[test]
+    fn word_diff_detects_changed_word() {
+        let segments = compute_word_diff("the quick brown fox", "the quick red fox");
+        // LCS: the, quick, fox (3 common). brown removed, red added.
+        // Result: Context(the), Context(quick), Removed(brown), Added(red), Context(fox)
+        assert_eq!(segments.len(), 5);
+        assert_eq!(segments[0], WordDiff::Context("the".to_string()));
+        assert_eq!(segments[1], WordDiff::Context("quick".to_string()));
+        assert_eq!(segments[2], WordDiff::Removed("brown".to_string()));
+        assert_eq!(segments[3], WordDiff::Added("red".to_string()));
+        assert_eq!(segments[4], WordDiff::Context("fox".to_string()));
+    }
+
+    #[test]
+    fn word_diff_all_changed() {
+        let segments = compute_word_diff("aaa bbb", "ccc ddd");
+        assert_eq!(segments.len(), 4);
+        assert!(segments
+            .iter()
+            .all(|s| matches!(s, WordDiff::Removed(_) | WordDiff::Added(_))));
+    }
+
+    #[test]
+    fn format_word_diff_basic() {
+        let segments = vec![
+            WordDiff::Context("the".to_string()),
+            WordDiff::Removed("brown".to_string()),
+            WordDiff::Added("red".to_string()),
+            WordDiff::Context("fox".to_string()),
+        ];
+        let formatted = format_word_diff(&segments);
+        assert!(formatted.contains("the"));
+        assert!(formatted.contains("[-brown-]"));
+        assert!(formatted.contains("{red}"));
+        assert!(formatted.contains("fox"));
+    }
+
+    #[test]
+    fn json_escape_quotes_and_backslashes() {
+        assert_eq!(json_escape(r#"he said "hello""#), r#"he said \"hello\""#);
+        assert_eq!(json_escape(r#"path\to\file"#), r#"path\\to\\file"#);
+        assert_eq!(json_escape("line1\nline2"), "line1\\nline2");
+    }
+
+    #[test]
+    fn json_output_structure() {
+        let old = vec_of(&["a", "b"]);
+        let new = vec_of(&["a", "X"]);
+        let hunks = compute_hunks(&old, &new, 0, false);
+        let json = format_json("old.txt", "new.txt", false, &hunks, &old);
+        assert!(json.contains("\"old_file\": \"old.txt\""));
+        assert!(json.contains("\"new_file\": \"new.txt\""));
+        assert!(json.contains("\"identical\": false"));
+        assert!(json.contains("\"insertions\":"));
+        assert!(json.contains("\"deletions\":"));
+    }
+
+    #[test]
+    fn detect_context_function_rust() {
+        let lines = vec_of(&[
+            "use std::io;",
+            "",
+            "fn main() {",
+            "    let x = 1;",
+            "}",
+            "",
+            "fn process_order(order: &Order) -> Result<()> {",
+            "    // do stuff",
+            "    let y = 2;",
+            "}",
+        ]);
+        let ctx = detect_context_function(&lines, 8);
+        assert!(ctx.is_some());
+        assert!(ctx.unwrap().contains("fn process_order"));
+    }
+
+    #[test]
+    fn detect_context_function_python() {
+        let lines = vec_of(&["class Foo:", "    def bar(self):", "        pass"]);
+        let ctx = detect_context_function(&lines, 2);
+        assert!(ctx.is_some());
+        assert!(ctx.unwrap().contains("def bar"));
+    }
+
+    #[test]
+    fn header_format_with_context() {
+        let h = Hunk {
+            old_start: 5,
+            old_count: 3,
+            new_start: 5,
+            new_count: 4,
+            lines: vec![],
+        };
+        assert_eq!(
+            format_hunk_header(&h, Some("fn process_order")),
+            "@@ -5,3 +5,4 @@ fn process_order"
+        );
     }
 }

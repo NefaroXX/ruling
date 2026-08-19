@@ -180,3 +180,131 @@ fn unified_context_flag_controls_context() {
     assert!(stdout.contains("-4\n"));
     assert!(stdout.contains("+X\n"));
 }
+
+#[test]
+fn json_output_is_valid_structure() {
+    let dir = tempdir("json");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "line1\nline2\nline3\n");
+    write(&b, "line1\nchanged\nline3\n");
+
+    let out = run(&["--json", a.to_str().unwrap(), b.to_str().unwrap()], &dir);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"meta\""));
+    assert!(stdout.contains("\"hunks\""));
+    assert!(stdout.contains("\"summary\""));
+    assert!(stdout.contains("\"old_file\""));
+    assert!(stdout.contains("\"new_file\""));
+    assert!(stdout.contains("\"identical\": false"));
+    assert!(stdout.contains("\"insertions\""));
+    assert!(stdout.contains("\"deletions\""));
+}
+
+#[test]
+fn json_identical_files() {
+    let dir = tempdir("json_identical");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "same\ncontent\n");
+    write(&b, "same\ncontent\n");
+
+    let out = run(&["--json", a.to_str().unwrap(), b.to_str().unwrap()], &dir);
+    assert_eq!(out.status.code(), Some(0));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"identical\": true"));
+}
+
+#[test]
+fn word_diff_shows_inline_changes() {
+    let dir = tempdir("word_diff");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "the quick brown fox\n");
+    write(&b, "the quick red fox\n");
+
+    let out = run(
+        &["--word-diff", a.to_str().unwrap(), b.to_str().unwrap()],
+        &dir,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // Word diff markers should be present.
+    assert!(stdout.contains("[-brown-]") || stdout.contains("{red}"));
+}
+
+#[test]
+fn ignore_all_space_whitespace_only_diff() {
+    let dir = tempdir("ws_diff");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "let  x  =  1;\n");
+    write(&b, "let x = 1;\n");
+
+    // Without -w, they differ.
+    let out = run(&[a.to_str().unwrap(), b.to_str().unwrap()], &dir);
+    assert_eq!(out.status.code(), Some(1));
+
+    // With -w, they are identical.
+    let out = run(&["-w", a.to_str().unwrap(), b.to_str().unwrap()], &dir);
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn ignore_all_space_long_form() {
+    let dir = tempdir("ws_long");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "hello   world\n");
+    write(&b, "hello world\n");
+
+    let out = run(
+        &[
+            "--ignore-all-space",
+            a.to_str().unwrap(),
+            b.to_str().unwrap(),
+        ],
+        &dir,
+    );
+    assert_eq!(out.status.code(), Some(0));
+}
+
+#[test]
+fn json_with_brief_outputs_json_summary() {
+    let dir = tempdir("json_brief");
+    let a = dir.join("a.txt");
+    let b = dir.join("b.txt");
+    write(&a, "a\n");
+    write(&b, "b\n");
+
+    let out = run(
+        &["--json", "-q", a.to_str().unwrap(), b.to_str().unwrap()],
+        &dir,
+    );
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(stdout.contains("\"meta\""));
+    assert!(stdout.contains("\"identical\": false"));
+}
+
+#[test]
+fn function_context_in_header() {
+    let dir = tempdir("func_ctx");
+    let a = dir.join("a.rs");
+    let b = dir.join("b.rs");
+    write(
+        &a,
+        "fn main() {\n    let x = 1;\n}\n\nfn process() {\n    let y = 2;\n}\n",
+    );
+    write(
+        &b,
+        "fn main() {\n    let x = 1;\n}\n\nfn process() {\n    let y = 99;\n}\n",
+    );
+
+    let out = run(&[a.to_str().unwrap(), b.to_str().unwrap()], &dir);
+    assert_eq!(out.status.code(), Some(1));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // The hunk header should contain the function name.
+    assert!(stdout.contains("fn process"));
+}

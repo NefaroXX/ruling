@@ -16,6 +16,12 @@ pub struct Config {
     pub ignore_case: bool,
     /// Whether to run in brief mode (`-q`), printing only a summary line.
     pub brief: bool,
+    /// Output diff as JSON instead of unified format.
+    pub json: bool,
+    /// Show word-level intra-line highlighting.
+    pub word_diff: bool,
+    /// Ignore all whitespace when comparing lines.
+    pub ignore_all_space: bool,
 }
 
 /// Errors produced while parsing command-line arguments.
@@ -48,6 +54,9 @@ pub fn parse_args(args: &[String]) -> Result<Config, ParseError> {
     let mut unified_context: usize = 3;
     let mut ignore_case = false;
     let mut brief = false;
+    let mut json = false;
+    let mut word_diff = false;
+    let mut ignore_all_space = false;
 
     let mut i = 0;
     while i < args.len() {
@@ -58,6 +67,15 @@ pub fn parse_args(args: &[String]) -> Result<Config, ParseError> {
             }
             "-q" | "--brief" => {
                 brief = true;
+            }
+            "--json" => {
+                json = true;
+            }
+            "--word-diff" => {
+                word_diff = true;
+            }
+            "-w" | "--ignore-all-space" => {
+                ignore_all_space = true;
             }
             "-u" | "--unified" => {
                 // The next argument is the context count.
@@ -99,6 +117,9 @@ pub fn parse_args(args: &[String]) -> Result<Config, ParseError> {
         unified_context,
         ignore_case,
         brief,
+        json,
+        word_diff,
+        ignore_all_space,
     })
 }
 
@@ -115,7 +136,7 @@ fn parse_context(value: &str) -> Result<usize, ParseError> {
 /// otherwise it is written to stdout (used for `--help`).
 pub fn print_usage(stderr: bool) {
     let text = "\
-ruling 0.1.0 — a friendly diff clone
+ruling 0.2.0 — a friendly diff clone
 
 USAGE:
     ruling <file-a> <file-b> [OPTIONS]
@@ -125,11 +146,14 @@ ARGS:
     <file-b>    The second file to compare
 
 OPTIONS:
-    -u, --unified N    Number of context lines (default: 3)
-    -i, --ignore-case  Ignore case when comparing lines
-    -q, --brief        Only report whether the files differ
-    -h, --help         Print this help and exit
-    -V, --version      Print version information and exit
+    -u, --unified N          Number of context lines (default: 3)
+    -i, --ignore-case        Ignore case when comparing lines
+    -w, --ignore-all-space   Ignore all whitespace when comparing
+    -q, --brief              Only report whether the files differ
+        --word-diff          Show word-level intra-line changes
+        --json               Output diff as JSON
+    -h, --help               Print this help and exit
+    -V, --version            Print version information and exit
 
 EXIT CODES:
     0    Files are identical
@@ -207,5 +231,39 @@ mod tests {
     fn rejects_bad_unified_value() {
         let err = parse_args(&args(&["-u", "abc", "a.txt", "b.txt"])).unwrap_err();
         assert_eq!(err, ParseError::BadUnified("abc".to_string()));
+    }
+
+    #[test]
+    fn parses_json_flag() {
+        let cfg = parse_args(&args(&["--json", "a.txt", "b.txt"])).unwrap();
+        assert!(cfg.json);
+        assert!(!cfg.word_diff);
+        assert!(!cfg.ignore_all_space);
+    }
+
+    #[test]
+    fn parses_word_diff_flag() {
+        let cfg = parse_args(&args(&["--word-diff", "a.txt", "b.txt"])).unwrap();
+        assert!(cfg.word_diff);
+    }
+
+    #[test]
+    fn parses_ignore_all_space_flag() {
+        let cfg = parse_args(&args(&["-w", "a.txt", "b.txt"])).unwrap();
+        assert!(cfg.ignore_all_space);
+    }
+
+    #[test]
+    fn parses_ignore_all_space_long_form() {
+        let cfg = parse_args(&args(&["--ignore-all-space", "a.txt", "b.txt"])).unwrap();
+        assert!(cfg.ignore_all_space);
+    }
+
+    #[test]
+    fn parses_multiple_new_flags() {
+        let cfg = parse_args(&args(&["--json", "--word-diff", "-w", "a.txt", "b.txt"])).unwrap();
+        assert!(cfg.json);
+        assert!(cfg.word_diff);
+        assert!(cfg.ignore_all_space);
     }
 }

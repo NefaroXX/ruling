@@ -17,7 +17,10 @@ ruling <file-a> <file-b> [OPTIONS]
 |------|-------------|
 | `-u`, `--unified N` | Number of context lines (default: 3) |
 | `-i`, `--ignore-case` | Compare case-insensitively |
+| `-w`, `--ignore-all-space` | Ignore all whitespace when comparing |
 | `-q`, `--brief` | Only report whether the files differ |
+| `--word-diff` | Show word-level intra-line changes |
+| `--json` | Output diff as structured JSON |
 | `-h`, `--help` | Print help and exit |
 | `-V`, `--version` | Print version and exit |
 
@@ -43,7 +46,59 @@ ruling -i Config.toml config.toml
 
 # Quick check — just tell me if they differ
 ruling -q file1.txt file2.txt
+
+# Ignore whitespace differences
+ruling -w old.py new.py
+
+# Word-level diff (highlights what changed within each line)
+ruling --word-diff old.py new.py
+
+# JSON output for AI/automation
+ruling --json old.py new.py
 ```
+
+## Features
+
+### Word-level diff
+
+`--word-diff` highlights exactly which words changed within each line, using
+`{added}` and `[-removed-]` markers. This makes it easy to see small changes
+in long lines.
+
+### JSON output
+
+`--json` outputs the diff as structured JSON — ideal for AI tools, automation,
+and programmatic consumption. The output includes file metadata, per-hunk
+details with line numbers, and a summary with insertion/deletion counts.
+
+```json
+{
+  "meta": { "old_file": "a.py", "new_file": "b.py", "identical": false },
+  "hunks": [
+    {
+      "old_start": 5, "old_count": 3, "new_start": 5, "new_count": 4,
+      "context": "fn process_order",
+      "lines": [
+        { "type": "context", "content": " let x = 1;", "old_line": 5, "new_line": 5 },
+        { "type": "removed", "content": " let x = 2;", "old_line": 6 },
+        { "type": "added", "content": " let x = 3;", "new_line": 6 }
+      ]
+    }
+  ],
+  "summary": { "files_changed": 1, "insertions": 1, "deletions": 1 }
+}
+```
+
+### Whitespace filtering
+
+`-w` / `--ignore-all-space` collapses all whitespace runs to a single space
+before comparing, so formatter-induced diffs don't clutter the output.
+
+### Function-aware headers
+
+Hunk headers include the containing function/struct/class name when available:
+`@@ -5,3 +5,4 @@ fn process_order()`. Supports Rust, Python, JavaScript,
+TypeScript, Go, and C/C++.
 
 ## How it works
 

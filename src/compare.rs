@@ -5,7 +5,7 @@
 //! [`crate::diff`].
 
 use crate::cli::Config;
-use crate::diff::{compute_hunks, format_hunk};
+use crate::diff::{compute_hunks_with_options, format_hunk_with_options, format_json, DiffOptions};
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Seek};
 
@@ -65,15 +65,44 @@ pub fn compare_files(cfg: &Config) -> Result<CompareOutcome, String> {
     let lines_a = read_lines(reader_a)?;
     let lines_b = read_lines(reader_b)?;
 
-    let hunks = compute_hunks(&lines_a, &lines_b, cfg.unified_context, cfg.ignore_case);
+    let opts = DiffOptions {
+        context: cfg.unified_context,
+        ignore_case: cfg.ignore_case,
+        ignore_all_space: cfg.ignore_all_space,
+        word_diff: cfg.word_diff,
+    };
+
+    let hunks = compute_hunks_with_options(&lines_a, &lines_b, &opts);
 
     if hunks.is_empty() {
+        if cfg.json {
+            println!(
+                "{}",
+                format_json(&cfg.file_a, &cfg.file_b, true, &hunks, &lines_a)
+            );
+        }
         return Ok(CompareOutcome::Identical);
     }
 
     // Files differ. In brief mode, print a summary line only.
     if cfg.brief {
-        println!("Files {} and {} differ", cfg.file_a, cfg.file_b);
+        if cfg.json {
+            println!(
+                "{}",
+                format_json(&cfg.file_a, &cfg.file_b, false, &hunks, &lines_a)
+            );
+        } else {
+            println!("Files {} and {} differ", cfg.file_a, cfg.file_b);
+        }
+        return Ok(CompareOutcome::Differ);
+    }
+
+    // JSON output mode.
+    if cfg.json {
+        println!(
+            "{}",
+            format_json(&cfg.file_a, &cfg.file_b, false, &hunks, &lines_a)
+        );
         return Ok(CompareOutcome::Differ);
     }
 
@@ -81,7 +110,7 @@ pub fn compare_files(cfg: &Config) -> Result<CompareOutcome, String> {
     println!("--- {}", cfg.file_a);
     println!("+++ {}", cfg.file_b);
     for hunk in &hunks {
-        print!("{}", format_hunk(hunk));
+        print!("{}", format_hunk_with_options(hunk, &opts, &lines_a));
     }
 
     Ok(CompareOutcome::Differ)
