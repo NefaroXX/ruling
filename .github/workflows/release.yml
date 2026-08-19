@@ -50,7 +50,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           tag="${GITHUB_REF_NAME}"
-          if [ "$tag" = "continuous" ]; then
-            gh release delete "$tag" --yes --cleanup-tag || true
-          fi
-          gh release create "$tag" artifacts/ruling-* --generate-notes --clobber
+          gh release delete "$tag" --yes || true
+          gh release create "$tag" artifacts/ruling-* --generate-notes
