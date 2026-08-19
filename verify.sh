@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Acceptance script for `verdict`.
+# Acceptance script for `ruling`.
 #
 # Exercises end-to-end checks including a real `diff -u` parity comparison
 # against the system diff when available. Exits 0 only when every check passes.
@@ -41,35 +41,35 @@ printf '\xff\xfe\x00\x01' > "$TMP/bin_a.bin"
 printf '\x00\x01\x02\x03' > "$TMP/bin_b.bin"
 
 # 1. Identical files -> exit 0, no output.
-./target/debug/verdict "$TMP/identical_a.txt" "$TMP/identical_b.txt" > "$TMP/out" 2>&1
+./target/debug/ruling "$TMP/identical_a.txt" "$TMP/identical_b.txt" > "$TMP/out" 2>&1
 code=$?
 check "identical files exit 0" $([ "$code" -eq 0 ] && [ ! -s "$TMP/out" ]; echo $?)
 
 # 2. Different files -> exit 1.
-./target/debug/verdict "$TMP/diff_a.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
+./target/debug/ruling "$TMP/diff_a.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
 check "different files exit 1" $([ $? -eq 1 ]; echo $?)
 
 # 3. Missing file -> exit 2.
-./target/debug/verdict "$TMP/does_not_exist.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
+./target/debug/ruling "$TMP/does_not_exist.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
 check "missing file exit 2" $([ $? -eq 2 ]; echo $?)
 
 # 4. Brief mode -> exit 1 and prints 'Files ... differ'.
-out=$(./target/debug/verdict -q "$TMP/diff_a.txt" "$TMP/diff_b.txt" 2>&1)
+out=$(./target/debug/ruling -q "$TMP/diff_a.txt" "$TMP/diff_b.txt" 2>&1)
 code=$?
 check "brief mode" $([ "$code" -eq 1 ] && printf '%s' "$out" | grep -q "differ"; echo $?)
 
 # 5. Binary files -> exit 1 and prints 'Binary files ... differ'.
-out=$(./target/debug/verdict "$TMP/bin_a.bin" "$TMP/bin_b.bin" 2>&1)
+out=$(./target/debug/ruling "$TMP/bin_a.bin" "$TMP/bin_b.bin" 2>&1)
 code=$?
 check "binary files" $([ "$code" -eq 1 ] && printf '%s' "$out" | grep -q "Binary files"; echo $?)
 
 # 6. Ignore-case: differing case treated as identical.
-./target/debug/verdict -i "$TMP/diff_a.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
+./target/debug/ruling -i "$TMP/diff_a.txt" "$TMP/diff_b.txt" > /dev/null 2>&1
 check "ignore-case" $([ $? -eq 0 ]; echo $?)
 
 # 7. Unified diff parity vs system diff -u (when available).
 if command -v diff > /dev/null 2>&1; then
-    ./target/debug/verdict "$TMP/diff_a.txt" "$TMP/diff_b.txt" > "$TMP/ours.txt" 2>&1
+    ./target/debug/ruling "$TMP/diff_a.txt" "$TMP/diff_b.txt" > "$TMP/ours.txt" 2>&1
     diff -u "$TMP/diff_a.txt" "$TMP/diff_b.txt" > "$TMP/system.txt" 2>&1
     # Compare the hunk/body portions. The header lines differ (we print plain
     # paths, GNU diff prints timestamps), so compare everything after the

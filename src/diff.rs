@@ -1,4 +1,4 @@
-//! Core line-diff engine for `verdict`.
+//! Core line-diff engine for `ruling`.
 //!
 //! This module computes a line-based diff between two sequences of lines and
 //! formats the result as GNU-style unified hunks with `@@ -a,b +c,d @@`

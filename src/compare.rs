@@ -1,4 +1,4 @@
-//! File I/O orchestration for `verdict`.
+//! File I/O orchestration for `ruling`.
 //!
 //! This module handles binary detection, line-by-line streaming via `BufRead`,
 //! exit-code mapping, and brief mode. The comparison itself is delegated to

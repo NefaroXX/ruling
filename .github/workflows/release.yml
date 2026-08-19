@@ -30,11 +30,11 @@ jobs:
         with:
           targets: ${{ matrix.target }}
       - run: cargo build --release --locked --target ${{ matrix.target }}
-      - run: mv target/${{ matrix.target }}/release/verdict${{ matrix.ext }} verdict-${{ matrix.target }}${{ matrix.ext }}
+      - run: mv target/${{ matrix.target }}/release/ruling${{ matrix.ext }} ruling-${{ matrix.target }}${{ matrix.ext }}
       - uses: actions/upload-artifact@v4
         with:
-          name: verdict-${{ matrix.target }}
-          path: verdict-${{ matrix.target }}${{ matrix.ext }}
+          name: ruling-${{ matrix.target }}
+          path: ruling-${{ matrix.target }}${{ matrix.ext }}
 
   publish:
     name: Create release
@@ -53,4 +53,4 @@ jobs:
           if [ "$tag" = "continuous" ]; then
             gh release delete "$tag" --yes --cleanup-tag || true
           fi
-          gh release create "$tag" artifacts/verdict-* --generate-notes
+          gh release create "$tag" artifacts/ruling-* --generate-notes

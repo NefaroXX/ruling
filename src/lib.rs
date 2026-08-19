@@ -1,4 +1,4 @@
-//! `verdict` is a minimal, dependency-free CLI tool that behaves like a
+//! `ruling` is a minimal, dependency-free CLI tool that behaves like a
 //! friendly `diff` clone. It compares two files line-by-line and reports
 //! whether they are identical, different, or binary.
 //!

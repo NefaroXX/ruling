@@ -1,13 +1,13 @@
-//! Entry point for the `verdict` CLI.
+//! Entry point for the `ruling` CLI.
 //!
 //! Handles argument parsing, orchestrates the comparison, and maps the result
 //! to the appropriate process exit code.
 
+use ruling::cli::{self, ParseError};
+use ruling::compare::{compare_files, CompareOutcome};
 use std::process::ExitCode;
-use verdict::cli::{self, ParseError};
-use verdict::compare::{compare_files, CompareOutcome};
 
-/// The process exit code for `verdict`.
+/// The process exit code for `ruling`.
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -26,7 +26,7 @@ fn main() -> ExitCode {
         Err(err) => {
             // Any parse error is an error condition: print usage to stderr and
             // exit with code 2.
-            eprintln!("verdict: {}", describe_parse_error(&err));
+            eprintln!("ruling: {}", describe_parse_error(&err));
             cli::print_usage(true);
             return ExitCode::from(2);
         }
@@ -40,7 +40,7 @@ fn main() -> ExitCode {
             ExitCode::from(1)
         }
         Err(msg) => {
-            eprintln!("verdict: {msg}");
+            eprintln!("ruling: {msg}");
             ExitCode::from(2)
         }
     }

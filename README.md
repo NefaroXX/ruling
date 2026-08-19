@@ -1,4 +1,4 @@
-# verdict
+# ruling
 
 A friendly, dependency-free `diff` clone for the command line.
 
@@ -8,7 +8,7 @@ different, or binary — with GNU-style unified output that matches `diff -u`.
 ## Usage
 
 ```
-verdict <file-a> <file-b> [OPTIONS]
+ruling <file-a> <file-b> [OPTIONS]
 ```
 
 ### Options
@@ -33,28 +33,28 @@ verdict <file-a> <file-b> [OPTIONS]
 
 ```bash
 # Basic comparison
-verdict old.py new.py
+ruling old.py new.py
 
 # Unified diff with 5 lines of context
-verdict -u 5 old.py new.py
+ruling -u 5 old.py new.py
 
 # Case-insensitive comparison
-verdict -i Config.toml config.toml
+ruling -i Config.toml config.toml
 
 # Quick check — just tell me if they differ
-verdict -q file1.txt file2.txt
+ruling -q file1.txt file2.txt
 ```
 
 ## How it works
 
-verdict reads both files line-by-line via `BufRead`, so multi-gigabyte files
+ruling reads both files line-by-line via `BufRead`, so multi-gigabyte files
 work without loading them into memory. It computes the longest common
 subsequence (LCS) to identify changes, then emits GNU-style unified hunks
 with `@@ -a,b +c,d @@` headers and configurable context lines.
 
 Binary files are detected by checking for null bytes and non-UTF-8 content
 in a bounded sample at the start of each file. When binary content is
-detected, verdict prints `Binary files <a> and <b> differ` and exits 1.
+detected, ruling prints `Binary files <a> and <b> differ` and exits 1.
 
 Adjacent hunks whose context regions overlap are automatically merged to
 match GNU diff output.
@@ -62,14 +62,14 @@ match GNU diff output.
 ## Installation
 
 ```bash
-cargo install verdict
+cargo install ruling
 ```
 
 Or build from source:
 
 ```bash
-git clone https://github.com/NefaroXX/verdict
-cd verdict
+git clone https://github.com/NefaroXX/ruling
+cd ruling
 cargo build --release
 ```
 

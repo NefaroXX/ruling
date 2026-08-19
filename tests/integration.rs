@@ -1,4 +1,4 @@
-//! End-to-end integration tests exercising the `verdict` CLI surface.
+//! End-to-end integration tests exercising the `ruling` CLI surface.
 //!
 //! These tests build and run the actual binary via `std::process::Command` to
 //! verify the real CLI behaviour including exit codes and output.
@@ -7,24 +7,24 @@ use std::fs;
 use std::path::PathBuf;
 use std::process::{Command, Output};
 
-/// Build the path to the compiled `verdict` binary.
+/// Build the path to the compiled `ruling` binary.
 fn binary() -> PathBuf {
     // Integration tests run with CARGO_BIN_EXE_<name> set by Cargo.
-    PathBuf::from(env!("CARGO_BIN_EXE_verdict"))
+    PathBuf::from(env!("CARGO_BIN_EXE_ruling"))
 }
 
-/// Run `verdict` with the given arguments and a temporary working directory.
+/// Run `ruling` with the given arguments and a temporary working directory.
 fn run(args: &[&str], cwd: &PathBuf) -> Output {
     Command::new(binary())
         .args(args)
         .current_dir(cwd)
         .output()
-        .expect("failed to run verdict")
+        .expect("failed to run ruling")
 }
 
 /// Create a temporary directory for a test, returning its path.
 fn tempdir(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("verdict_test_{}_{}", name, std::process::id()));
+    let dir = std::env::temp_dir().join(format!("ruling_test_{}_{}", name, std::process::id()));
     let _ = fs::remove_dir_all(&dir);
     fs::create_dir_all(&dir).expect("failed to create temp dir");
     dir
@@ -115,7 +115,7 @@ fn version_exits_zero() {
     let out = run(&["--version"], &dir);
     assert_eq!(out.status.code(), Some(0));
     let stdout = String::from_utf8_lossy(&out.stdout);
-    assert!(stdout.contains("verdict"));
+    assert!(stdout.contains("ruling"));
 }
 
 #[test]

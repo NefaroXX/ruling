@@ -1,6 +1,6 @@
-//! Hand-rolled command-line argument parsing for `verdict`.
+//! Hand-rolled command-line argument parsing for `ruling`.
 //!
-//! The CLI surface is `verdict <file-a> <file-b> [OPTIONS]`. We deliberately
+//! The CLI surface is `ruling <file-a> <file-b> [OPTIONS]`. We deliberately
 //! avoid clap or any argument-parsing crate to keep the crate dependency-free.
 
 /// The parsed command-line configuration.
@@ -115,10 +115,10 @@ fn parse_context(value: &str) -> Result<usize, ParseError> {
 /// otherwise it is written to stdout (used for `--help`).
 pub fn print_usage(stderr: bool) {
     let text = "\
-verdict 0.1.0 — a friendly diff clone
+ruling 0.1.0 — a friendly diff clone
 
 USAGE:
-    verdict <file-a> <file-b> [OPTIONS]
+    ruling <file-a> <file-b> [OPTIONS]
 
 ARGS:
     <file-a>    The first file to compare
@@ -145,7 +145,7 @@ EXIT CODES:
 
 /// Print the version string to stdout.
 pub fn print_version() {
-    println!("verdict {}", env!("CARGO_PKG_VERSION"));
+    println!("ruling {}", env!("CARGO_PKG_VERSION"));
 }
 
 #[cfg(test)]
