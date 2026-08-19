@@ -53,4 +53,4 @@ jobs:
           if [ "$tag" = "continuous" ]; then
             gh release delete "$tag" --yes --cleanup-tag || true
           fi
-          gh release create "$tag" artifacts/ruling-* --generate-notes
+          gh release create "$tag" artifacts/ruling-* --generate-notes --clobber
